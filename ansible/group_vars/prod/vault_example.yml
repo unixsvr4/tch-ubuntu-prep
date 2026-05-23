@@ -1,0 +1,41 @@
+---
+# group_vars/prod/vault_example.yml
+# ============================================================
+# EXAMPLE of what ansible-vault encrypted variables look like.
+# This file is NOT encrypted (it's for study reference only).
+#
+# To create a real encrypted version:
+#   ansible-vault create group_vars/prod/vault.yml
+#   # Then type the variables and save
+#
+# To encrypt a single value inline (preferred for production):
+#   ansible-vault encrypt_string 'Pg@ssw0rd2024!' --name 'vault_db_password' \
+#     --vault-password-file .vault_pass
+#
+# The output looks like:
+#   vault_db_password: !vault |
+#     $ANSIBLE_VAULT;1.1;AES256
+#     66386439653236336462626566653337623062313165
+#     ...
+#
+# Why encrypt_string over encrypt (file)?
+#   - Variable names stay readable (good for documentation / code review)
+#   - Only the VALUES are ciphertext
+#   - Can be committed to git safely
+#   - PCI-DSS: credentials must not be stored in plaintext in version control
+# ============================================================
+
+# These are PLAINTEXT examples for study — in production ALL of these
+# would be encrypted with ansible-vault
+vault_db_password: "Pg@ssw0rd2024!"
+vault_db_user: "payments_app"
+vault_stripe_api_key: "sk_live_EXAMPLE_KEY"
+# Vault token for payment-app policy
+vault_vault_token: "s.EXAMPLE_VAULT_TOKEN"
+
+# In production, this file would look like:
+# vault_db_password: !vault |
+#   $ANSIBLE_VAULT;1.1;AES256
+#   66386439653236336462626566653337623062313165316535636232356366646d356e6e633
+#   3261623335353435383130656136633733383566373833610a663533336531303664306461
+#   ...

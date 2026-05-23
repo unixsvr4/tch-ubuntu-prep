@@ -1,0 +1,232 @@
+---
+# ============================================================
+# PCI-DSS CIS Level 2 Hardening Playbook
+# ============================================================
+# Covers tch_prep_claude0.md section 2.4
+#
+# Run (dry run):   make ansible-check
+# Run (apply):     make ansible-hardening
+# Ping first:      make ansible-ping
+#
+# What this playbook does:
+#   - Disables root SSH login
+#   - Enforces SSH key-only auth (no passwords)
+#   - Sets 15-minute idle timeout (PCI-DSS 8.2.8)
+#   - Starts and enables auditd (PCI-DSS req 10)
+#   - Configures auditd rules for privileged command logging
+#   - Disables unnecessary services (bluetooth, cups, avahi)
+#   - Sets umask 027 (files not world-readable by default)
+#   - Deploys hardened app config with correct permissions
+#
+# PCI-DSS requirements satisfied:
+#   - 2.2: System components configured securely
+#   - 8.2.8: Idle session timeout ≤ 15 minutes
+#   - 10.2: Audit all CDE system access
+#   - 10.3: Protect audit logs from destruction
+# ============================================================
+
+- name: PCI-DSS CIS Level 2 hardening for payment servers
+  hosts: payment_servers
+  become: true
+
+  vars_files:
+    # group_vars/all.yml: app_name, ssh_idle_timeout, auditd_rules_file, etc.
+    - ../group_vars/all.yml
+    # In production: ansible-vault encrypted file
+    # Run with: ansible-playbook hardening.yml --vault-password-file .vault_pass
+    # For this practice demo: unencrypted example file
+    - ../group_vars/prod/vault_example.yml
+
+  vars:
+    # SSH hardening
+    # prohibit-password: disables password-based root login (PCI-DSS compliant) while
+    # keeping key-based root login (required for Ansible access in this practice env).
+    # In production: use a named non-root service account with sudo instead of root.
+    permit_root_login: "prohibit-password"
+    password_authentication: "no"
+    # 15 min
+    client_alive_interval: "{{ ssh_idle_timeout | default(900) }}"
+
+    # Unnecessary services to disable (reduces attack surface)
+    unused_services:
+      - bluetooth
+      - cups
+      - avahi-daemon
+
+  tasks:
+
+    # ── SSH Hardening ─────────────────────────────────────────────────────
+
+    - name: "SSH | Disable root login"
+      # PCI-DSS 2.2: system components must be configured securely.
+      # Root SSH login allows direct privileged access — must use sudo from named accounts.
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?PermitRootLogin"
+        line: "PermitRootLogin {{ permit_root_login }}"
+        backup: true
+      notify: restart sshd
+
+    - name: "SSH | Enforce key-only authentication (disable password auth)"
+      # PCI-DSS 8.2.1: all user authentication uses individual authentication.
+      # Password auth allows brute-force attacks; keys with passphrases are required.
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?PasswordAuthentication"
+        line: "PasswordAuthentication {{ password_authentication }}"
+      notify: restart sshd
+
+    - name: "SSH | Set 15-minute idle session timeout"
+      # PCI-DSS 8.2.8: idle user sessions must be disconnected after ≤ 15 minutes.
+      # ClientAliveInterval: seconds between keepalive probes.
+      # ClientAliveCountMax: probes sent before disconnect (1 × 900s = 15min exactly).
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?ClientAliveInterval"
+        line: "ClientAliveInterval {{ client_alive_interval }}"
+      notify: restart sshd
+
+    - name: "SSH | Set max keepalive count to 1"
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?ClientAliveCountMax"
+        line: "ClientAliveCountMax 1"
+      notify: restart sshd
+
+    - name: "SSH | Disable X11 forwarding"
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?X11Forwarding"
+        line: "X11Forwarding no"
+      notify: restart sshd
+
+    - name: "SSH | Limit to protocol 2 only"
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?Protocol"
+        line: "Protocol 2"
+      notify: restart sshd
+
+    # ── Auditd ────────────────────────────────────────────────────────────
+
+    - name: "Auditd | Ensure auditd is installed"
+      package:
+        name: auditd
+        state: present
+
+    - name: "Auditd | Ensure auditd is started and enabled"
+      # PCI-DSS req 10: log and monitor all CDE access.
+      # auditd captures privileged commands, file modifications, auth events.
+      service:
+        name: auditd
+        state: started
+        enabled: true
+      # Docker containers may not have systemd; ignore for demo
+      ignore_errors: true
+
+    - name: "Auditd | Deploy PCI-DSS audit rules"
+      # PCI-DSS 10.2: capture all use of root/sudo, changes to auth files, access to audit logs.
+      copy:
+        dest: "{{ auditd_rules_file | default('/etc/audit/rules.d/payment.rules') }}"
+        content: |
+          # Log all privileged command execution (any process run as root/euid=0)
+          # PCI-DSS 10.2.2: capture all actions by root
+          -a always,exit -F arch=b64 -S execve -F euid=0 -k privileged
+
+          # Log changes to password file (new users, privilege changes)
+          # PCI-DSS 10.2.5: capture changes to authentication mechanisms
+          -w /etc/passwd -p wa -k passwd_changes
+          -w /etc/shadow -p wa -k shadow_changes
+          -w /etc/sudoers -p wa -k sudoers_changes
+
+          # Log access to the audit log itself
+          # PCI-DSS 10.3: prevent unauthorized modifications to audit logs
+          -w /var/log/audit/audit.log -p rwa -k audit_log_access
+          -w /var/log/auth.log -p wa -k auth_log
+
+          # Log SSH session management
+          -w /var/log/secure -p wa -k ssh_sessions
+
+          # Log all sudo invocations
+          -a always,exit -F arch=b64 -S execve -F euid=0 -F auid>=1000 -F auid!=4294967295 -k sudo_cmds
+        # GOOD: root read/write, root group read — not world-readable
+        mode: "0640"
+        owner: root
+        group: root
+      notify: restart auditd
+
+    # ── Service Hardening ─────────────────────────────────────────────────
+
+    - name: "Services | Gather service facts (needed to check what exists)"
+      ansible.builtin.service_facts:
+
+    - name: "Services | Stop and disable unnecessary services"
+      # Reduce attack surface: Bluetooth, CUPS, Avahi have no place on a payment server.
+      # PCI-DSS 2.2.5: remove all unnecessary functionality.
+      # 'when' skips silently if the service isn't installed (clean output in Docker).
+      service:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop: "{{ unused_services }}"
+      when: "(item + '.service') in ansible_facts.services or item in ansible_facts.services"
+
+    # ── File System Security ───────────────────────────────────────────────
+
+    - name: "Umask | Set umask 027 in /etc/profile"
+      # umask 027: new files are rw-r----- (owner read/write, group read, others none).
+      # Prevents accidental world-readable config files containing secrets.
+      lineinfile:
+        path: /etc/profile
+        regexp: "^umask"
+        line: "umask 027"
+
+    - name: "Permissions | Ensure /etc/payments directory exists"
+      file:
+        path: /etc/payments
+        state: directory
+        owner: payments
+        group: payments
+        mode: "0750"
+      ignore_errors: true
+
+    - name: "Permissions | Deploy app config with strict permissions"
+      # PCI-DSS 7.1: protect all system components and sensitive data.
+      # mode 0600: owner-only read/write — other users cannot read the app config.
+      template:
+        src: ../templates/app.conf.j2
+        dest: /etc/payments/app.conf
+        owner: payments
+        group: payments
+        # GOOD: owner read/write only — no_log on anything referencing this
+        mode: "0600"
+      ignore_errors: true
+
+    # ── Users ─────────────────────────────────────────────────────────────
+
+    - name: "Users | Create non-root payment service account"
+      # PCI-DSS 8.2.1: each individual must have a unique user ID.
+      # Never run the payment service as root.
+      user:
+        name: payments
+        system: true
+        # Service account: no interactive login
+        shell: /usr/sbin/nologin
+        home: /opt/payments
+        create_home: true
+
+  handlers:
+
+    - name: restart sshd
+      # reload (SIGHUP) re-reads sshd_config without dropping the active Ansible connection.
+      # restart would kill the SSH session Ansible is using, causing "unreachable" errors.
+      service:
+        name: "{{ 'sshd' if 'sshd.service' in ansible_facts.services else 'ssh' }}"
+        state: reloaded
+      ignore_errors: true
+
+    - name: restart auditd
+      service:
+        name: auditd
+        state: restarted
+      ignore_errors: true
