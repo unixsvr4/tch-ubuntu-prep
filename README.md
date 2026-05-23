@@ -29,7 +29,7 @@ tch-ubuntu-prep/
 ├── docker/ansible-target/     ← Ubuntu 22.04 container with sshd + auditd
 ├── docker-compose.yml         ← Vault + PostgreSQL + LocalStack + Ansible target
 └── scripts/
-    ├── install-tools.sh       ← brew install everything
+    ├── install-tools.sh       ← apt/pip3 install everything (Ubuntu 24.04)
     └── scan-all.sh            ← Run all scanners on all Terraform directories
 ```
 
@@ -311,7 +311,7 @@ Bug 4 (Ansible) is in `ansible/playbooks/secrets-bad.yml` — not Terraform.
 make help              # show all targets
 
 # Setup
-make install-tools     # brew install everything (one-time)
+make install-tools     # apt/pip3 install everything (one-time, requires sudo)
 make setup             # generate SSH key + build containers (one-time)
 make up                # start all 4 services
 make down              # stop all services
