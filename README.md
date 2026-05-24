@@ -351,6 +351,35 @@ make ansible-lint      # lint all playbooks
 # Day 4
 make bugs-scan         # run scanners on spot-the-bug exercises
 make bugs-reveal       # show the answer key
+
+# Cleanup
+make down              # stop containers (keep volumes + state — resumable)
+make teardown          # FULL cleanup: destroy everything, wipe state and keys
+```
+
+---
+
+## Cleanup / Teardown
+
+When you're done with all practice and want to reclaim disk space:
+
+```bash
+make teardown
+```
+
+This destroys everything in order:
+1. `terraform destroy` on LocalStack resources
+2. `docker compose down --volumes --rmi all` — removes containers, volumes, and all pulled images
+3. Wipes `.terraform/` dirs and all `terraform.tfstate` files
+4. Removes the terraform plugin cache (`~/.terraform.d/plugin-cache`)
+5. Removes the Ansible demo SSH key pair
+6. Removes any `ansible/.vault_pass` file
+
+Use `make down` instead if you just want to stop the services and resume later — it leaves state and keys intact.
+
+To start completely fresh after a teardown:
+```bash
+make setup && make up && make vault-setup
 ```
 
 ---

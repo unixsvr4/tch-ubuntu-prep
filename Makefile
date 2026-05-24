@@ -111,6 +111,24 @@ up: ## Start all services (vault, postgres, localstack, ansible-target)
 down: ## Stop all services and remove containers
 	@docker compose down
 
+.PHONY: teardown
+teardown: ## FULL CLEANUP: destroy everything after practice is done
+	@echo "$(YELLOW)==> Destroying LocalStack Terraform resources...$(RESET)"
+	@cd terraform/localstack && terraform destroy -auto-approve -no-color 2>/dev/null || true
+	@echo "$(YELLOW)==> Stopping and removing all containers, volumes, and images...$(RESET)"
+	@docker compose down --volumes --rmi all --remove-orphans
+	@echo "$(YELLOW)==> Removing Terraform state and provider cache...$(RESET)"
+	@find terraform/ -name '.terraform' -type d -exec rm -rf {} + 2>/dev/null || true
+	@find terraform/ -name 'terraform.tfstate*' -exec rm -f {} + 2>/dev/null || true
+	@rm -rf $(HOME)/.terraform.d/plugin-cache
+	@echo "$(YELLOW)==> Removing Ansible demo SSH key...$(RESET)"
+	@rm -f ansible/demo_key ansible/demo_key.pub docker/ansible-target/authorized_keys
+	@echo "$(YELLOW)==> Removing Vault password file if present...$(RESET)"
+	@rm -f ansible/.vault_pass
+	@echo ""
+	@echo "$(GREEN)✓ Teardown complete. Nothing left running.$(RESET)"
+	@echo "  To start fresh: make setup && make up && make vault-setup"
+
 .PHONY: logs
 logs: ## Follow logs from all services (Ctrl+C to stop)
 	@docker compose logs -f
