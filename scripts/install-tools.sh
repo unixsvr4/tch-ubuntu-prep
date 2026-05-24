@@ -147,6 +147,37 @@ if ! check_or_skip "aws"; then
     printf "  ${GREEN}✓${RESET} %-20s installed\n" "aws"
 fi
 
+# ── 8. LocalStack dummy AWS credentials ──────────────────────────────────
+# LocalStack doesn't validate credentials but the AWS CLI requires them to be set.
+echo ""
+echo "LocalStack AWS credentials:"
+CREDS_FILE="${HOME}/.aws/credentials"
+CONFIG_FILE="${HOME}/.aws/config"
+# When run via sudo, configure for the invoking user, not root
+TARGET_HOME="${HOME}"
+if [ -n "${SUDO_USER:-}" ]; then
+    TARGET_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+    CREDS_FILE="${TARGET_HOME}/.aws/credentials"
+    CONFIG_FILE="${TARGET_HOME}/.aws/config"
+fi
+if grep -qs 'aws_access_key_id' "$CREDS_FILE" 2>/dev/null; then
+    printf "  ${GREEN}✓${RESET} %-20s %s\n" "~/.aws/credentials" "already configured"
+else
+    mkdir -p "${TARGET_HOME}/.aws"
+    cat > "$CREDS_FILE" <<'AWSCREDS'
+[default]
+aws_access_key_id = test
+aws_secret_access_key = test
+AWSCREDS
+    cat > "$CONFIG_FILE" <<'AWSCONFIG'
+[default]
+region = us-east-1
+output = json
+AWSCONFIG
+    [ -n "${SUDO_USER:-}" ] && chown -R "${SUDO_USER}:${SUDO_USER}" "${TARGET_HOME}/.aws"
+    printf "  ${GREEN}✓${RESET} %-20s %s\n" "~/.aws/credentials" "created (test/test for LocalStack)"
+fi
+
 # ── Version summary ───────────────────────────────────────────────────────
 echo ""
 echo -e "${CYAN}==> Installed versions:${RESET}"

@@ -126,6 +126,14 @@ aws --endpoint-url=http://localhost:4566 dynamodb list-tables
 aws --endpoint-url=http://localhost:4566 secretsmanager list-secrets
 ```
 
+> **NoCredentials error?** LocalStack doesn't validate credentials but the AWS CLI still requires
+> them to be present. `make install-tools` sets this up automatically. To fix manually:
+> ```bash
+> mkdir -p ~/.aws
+> printf '[default]\naws_access_key_id = test\naws_secret_access_key = test\n' > ~/.aws/credentials
+> printf '[default]\nregion = us-east-1\noutput = json\n' > ~/.aws/config
+> ```
+
 ---
 
 ## Day 2 — Vault Dynamic Credentials
