@@ -58,19 +58,29 @@ fi
 echo ""
 echo "Infrastructure tools (HashiCorp APT repo):"
 
-if ! check_or_skip "terraform"; then
-    echo -e "  ${YELLOW}→${RESET} Adding HashiCorp APT repo..."
-    wget -qO- https://apt.releases.hashicorp.com/gpg \
-        | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
-    echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
-        https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
-        | sudo tee /etc/apt/sources.list.d/hashicorp.list > /dev/null
-    sudo apt-get update -qq
-    sudo apt-get install -y terraform vault
-    printf "  ${GREEN}✓${RESET} %-20s installed\n" "terraform"
-    printf "  ${GREEN}✓${RESET} %-20s installed\n" "vault"
-else
-    check_or_skip "vault" || { sudo apt-get install -y -qq vault && printf "  ${GREEN}✓${RESET} %-20s installed\n" "vault"; }
+_need_terraform=false
+_need_vault=false
+check_or_skip "terraform" || _need_terraform=true
+check_or_skip "vault"     || _need_vault=true
+
+if [ "$_need_terraform" = true ] || [ "$_need_vault" = true ]; then
+    if [ ! -f /usr/share/keyrings/hashicorp-archive-keyring.gpg ]; then
+        echo -e "  ${YELLOW}→${RESET} Adding HashiCorp APT repo..."
+        wget -qO- https://apt.releases.hashicorp.com/gpg \
+            | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+        echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
+            https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
+            | sudo tee /etc/apt/sources.list.d/hashicorp.list > /dev/null
+        sudo apt-get update -qq
+    fi
+    if [ "$_need_terraform" = true ]; then
+        sudo apt-get install -y -qq terraform
+        printf "  ${GREEN}✓${RESET} %-20s installed\n" "terraform"
+    fi
+    if [ "$_need_vault" = true ]; then
+        sudo apt-get install -y -qq vault
+        printf "  ${GREEN}✓${RESET} %-20s installed\n" "vault"
+    fi
 fi
 
 # ── 3. Ansible ────────────────────────────────────────────────────────────
@@ -85,9 +95,18 @@ fi
 # ── 4. Checkov (pip3) ─────────────────────────────────────────────────────
 echo ""
 echo "Security scanning tools:"
-if ! check_or_skip "checkov"; then
+_checkov_found() {
+    command -v checkov &>/dev/null && return 0
+    # When run via sudo, also check the invoking user's local bin
+    [ -n "${SUDO_USER:-}" ] && su - "$SUDO_USER" -c 'command -v checkov' &>/dev/null && return 0
+    return 1
+}
+if _checkov_found; then
+    CHECKOV_PATH=$(command -v checkov 2>/dev/null || su - "$SUDO_USER" -c 'command -v checkov' 2>/dev/null)
+    printf "  ${GREEN}✓${RESET} %-20s %s\n" "checkov" "already installed: $CHECKOV_PATH"
+else
     echo -e "  ${YELLOW}→${RESET} Installing checkov via pip3..."
-    pip3 install --quiet checkov
+    pip3 install --quiet --break-system-packages checkov
     printf "  ${GREEN}✓${RESET} %-20s installed\n" "checkov"
 fi
 
@@ -135,7 +154,7 @@ printf "  %-20s %s\n" "docker:"     "$(docker --version 2>/dev/null || echo 'not
 printf "  %-20s %s\n" "terraform:"  "$(terraform version -json 2>/dev/null | python3 -c 'import sys,json; print(json.load(sys.stdin).get("terraform_version","?"))' 2>/dev/null || echo 'not found')"
 printf "  %-20s %s\n" "vault:"      "$(vault version 2>/dev/null || echo 'not found')"
 printf "  %-20s %s\n" "ansible:"    "$(ansible --version 2>/dev/null | head -1 || echo 'not found')"
-printf "  %-20s %s\n" "checkov:"    "$(checkov --version 2>/dev/null || echo 'not found')"
+printf "  %-20s %s\n" "checkov:"    "$(checkov --version 2>/dev/null || { [ -n "${SUDO_USER:-}" ] && su - "$SUDO_USER" -c 'checkov --version' 2>/dev/null; } || echo 'not found')"
 printf "  %-20s %s\n" "tfsec:"      "$(tfsec --version 2>/dev/null || echo 'not found')"
 printf "  %-20s %s\n" "trivy:"      "$(trivy --version 2>/dev/null | head -1 || echo 'not found')"
 printf "  %-20s %s\n" "aws cli:"    "$(aws --version 2>/dev/null || echo 'not found')"
