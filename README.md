@@ -248,8 +248,18 @@ cd ansible
 echo "tch-practice-vault-pass" > .vault_pass
 ansible-vault encrypt_string 'Pg@ssw0rd2024!' --name 'vault_db_password' --vault-password-file .vault_pass
 
-# Create an encrypted file
-ansible-vault create group_vars/prod/vault.yml --vault-password-file .vault_pass
+# Recreate group_vars/prod/vault.yml from scratch (non-interactive)
+# NOTE: `ansible-vault create` fails if the file already exists — use this instead:
+rm -f group_vars/prod/vault.yml
+printf 'vault_db_password: "Pg@ssw0rd2024!"\nvault_db_user: "payments_app"\nvault_stripe_api_key: "sk_live_EXAMPLE_KEY"\nvault_vault_token: "s.EXAMPLE_VAULT_TOKEN"\n' \
+  > group_vars/prod/vault.yml
+ansible-vault encrypt group_vars/prod/vault.yml --vault-password-file .vault_pass
+
+# Verify it decrypts correctly
+ansible-vault view group_vars/prod/vault.yml --vault-password-file .vault_pass
+
+# Run the secrets playbook
+ansible-playbook -i inventory/docker-hosts playbooks/secrets-good.yml -v
 
 # Run playbook with vault password
 ansible-playbook -i inventory/docker-hosts playbooks/hardening.yml --vault-password-file ./.vault_pass
